@@ -1,0 +1,72 @@
+name: Build
+
+# DayLight Creative Technologies fork. SocialScoreKeeper pins this fork by commit SHA, and its
+# `scripts/check_fork_ci_green.py` (gate #76) requires the pinned commit to have a green run of this
+# workflow in which the job named "SwiftPM build (iOS)" succeeded. Renaming that job breaks the gate, by design.
+#
+# A push to the default branch starts a run; it can also be dispatched by hand:
+#   gh workflow run build.yml --repo DayLight-Creative-Technologies/dlct_onnxruntime --ref master
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The plugin's Swift package (ios/onnxruntime/Package.swift) built by Swift Package Manager in the
+  # example app. A plugin whose manifest Flutter cannot use falls back to CocoaPods silently, so the build
+  # alone proves nothing: the next step fails unless Flutter's generated plugin package links onnxruntime
+  # through its Swift package, and the last unless the built app defines OrtGetApiBase, the symbol the Dart
+  # bindings look up with dlsym (without it media moderation cannot load its model).
+  swiftpm-build-ios:
+    name: SwiftPM build (iOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+    - run: flutter --version
+    - run: flutter config --enable-swift-package-manager
+    - name: Build the example app with Swift Package Manager (iOS Simulator)
+      working-directory: example
+      run: |
+        flutter pub get
+        flutter build ios --simulator --debug
+    - name: Fail unless onnxruntime linked through its Swift package
+      working-directory: example
+      run: |
+        grep -F '.product(name: "onnxruntime", package: "onnxruntime")' ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
+        if grep -E '^  - onnxruntime' ios/Podfile.lock 2>/dev/null; then echo "onnxruntime came through CocoaPods"; exit 1; fi
+    - name: Fail unless the app defines OrtGetApiBase
+      working-directory: example
+      run: |
+        app=build/ios/iphonesimulator/Runner.app
+        found=0
+        for bin in "$app/Runner" "$app/Runner.debug.dylib"; do
+          if [ -f "$bin" ] && nm -gU "$bin" | grep -q ' T _OrtGetApiBase$'; then echo "OrtGetApiBase defined in $bin"; found=1; fi
+        done
+        test "$found" = 1
+
+  # The CocoaPods build of the same example (ios/onnxruntime.podspec -> onnxruntime-objc 1.15.1), the path an
+  # app takes until it builds with Swift Package Manager.
+  cocoapods-build-ios:
+    name: CocoaPods build (iOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+    - run: flutter --version
+    - run: flutter config --no-enable-swift-package-manager
+    - name: Build the example app with CocoaPods (iOS Simulator)
+      working-directory: example
+      run: |
+        flutter pub get
+        flutter build ios --simulator --debug

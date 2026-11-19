@@ -1,3 +1,17 @@
+## 1.4.3
+
+* iOS: Swift Package Manager support. `ios/onnxruntime/Package.swift` links the same ONNX Runtime the CocoaPods
+  build links, 1.15.1: Microsoft publishes no Swift package for ONNX Runtime, so the binary target is the
+  `onnxruntime-c` 1.15.1 pod's own archive by URL and checksum (static `onnxruntime.framework`, device arm64,
+  Simulator arm64 + x86_64). The Dart bindings look up `OrtGetApiBase` with `dlsym`, and nothing in the app calls
+  it, so the package's one C source keeps a `used` reference to it: without that, the linker never loads it from
+  the static framework and moderation cannot create a session. The C source also asserts at compile time that
+  the linked headers serve C API version 14, the version the bindings request.
+* iOS: `ios/onnxruntime.podspec` is unchanged; the CocoaPods build still links `onnxruntime-objc` 1.15.1.
+* Example: iOS deployment target 12.0 -> 13.0 (the package's platform, Flutter's iOS floor).
+* CI: `.github/workflows/build.yml` builds the example for the iOS Simulator with Swift Package Manager (fails unless
+  Flutter links onnxruntime through its Swift package and the app defines `OrtGetApiBase`) and with CocoaPods.
+
 ## 1.4.2
 
 * Android: replace bundled `libonnxruntime.so` (arm64-v8a, armeabi-v7a) with
